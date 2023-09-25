@@ -1,3 +1,4 @@
+use actix_web::{error, web, HttpResponse};
 use deadpool_postgres;
 use serde::{Deserialize, Serialize};
 
@@ -14,5 +15,12 @@ impl Config {
             .build()?;
 
         config.try_deserialize()
+    }
+
+    pub fn json_extractor_config() -> web::JsonConfig {
+        web::JsonConfig::default().error_handler(|err, _req| {
+            error::InternalError::from_response(err, HttpResponse::UnprocessableEntity().into())
+                .into()
+        })
     }
 }

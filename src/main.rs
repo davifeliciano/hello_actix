@@ -1,4 +1,4 @@
-use actix_web::{error, web, App, HttpResponse, HttpServer};
+use actix_web::{web, App, HttpServer};
 use dotenv::dotenv;
 use tokio_postgres::NoTls;
 
@@ -22,10 +22,7 @@ async fn main() -> std::io::Result<()> {
     let addr = "127.0.0.1";
 
     let server = HttpServer::new(move || {
-        let json_config = web::JsonConfig::default().error_handler(|err, _req| {
-            error::InternalError::from_response(err, HttpResponse::UnprocessableEntity().into())
-                .into()
-        });
+        let json_config = Config::json_extractor_config();
 
         App::new()
             .app_data(json_config)
