@@ -1,5 +1,5 @@
-use crate::{database, errors::AppError, models::Person};
-use actix_web::{get, http::header::ContentType, post, web, HttpResponse, Responder};
+use crate::{database, errors::AppError, models::Person, utils::validate_ymd_string};
+use actix_web::{get, http::header::ContentType, post, web, HttpResponse};
 use deadpool_postgres::Pool;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -43,13 +43,61 @@ pub async fn count_people(pool: web::Data<Pool>) -> Result<HttpResponse, AppErro
 }
 
 #[post("")]
-pub async fn create_person(_body: web::Json<Person>, _pool: web::Data<Pool>) -> impl Responder {
-    HttpResponse::Created()
+pub async fn create_person(
+    body: web::Json<Person>,
+    pool: web::Data<Pool>,
+) -> Result<HttpResponse, AppError> {
+    let person = body.into_inner();
+
+    if !validate_ymd_string(&person.nascimento) {
+        return Ok(HttpResponse::UnprocessableEntity()
+            .body("Invalid date on field 'nascimento'. Expected format is YYYY-MM-DD."));
+    };
+
+    let client = pool.get().await.map_err(AppError::PoolError)?;
+
+    client
+        .query(
+            r#"
+                INSERT INTO pessoas
+                    (apelido, nome, nascimento, stack)
+                VALUES
+                    ($1, $2, $3, $4);
+            "#,
+            &[
+                &person.apelido,
+                &person.nome,
+                &person.nascimento,
+                &person.stack,
+            ],
+        )
+        .await
+        .map_err(insert_error_mapper)?;
+
+    Ok(HttpResponse::Created().into())
+}
+
+fn insert_error_mapper(err: tokio_postgres::Error) -> AppError {
+    match err.as_db_error().map(|err| err.constraint()) {
+        Some(Some(constraint)) => {
+            if constraint == "pessoas_apelido_key" {
+                AppError::Conflict
+            } else {
+                AppError::PostgresError(err)
+            }
+        }
+        _ => AppError::PostgresError(err),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use actix_web::{test, web::Bytes, App};
+    use actix_web::{
+        http::{header, StatusCode},
+        test::{self},
+        web::Bytes,
+        App,
+    };
     use deadpool_postgres::{Client, PoolError};
     use dotenv;
     use tokio_pg_mapper::FromTokioPostgresRow;
@@ -173,5 +221,67 @@ mod tests {
         let result = test::call_and_read_body(&app, req).await;
 
         assert_eq!(result, Bytes::from_static(b"1"));
+    }
+
+    fn create_person_request_factory(payload: String) -> test::TestRequest {
+        test::TestRequest::post()
+            .uri("/pessoas")
+            .insert_header(header::ContentType::json())
+            .set_payload(payload)
+    }
+
+    #[actix_web::test]
+    async fn test_create_person() {
+        let pool = get_pool();
+        let client = pool.get().await.unwrap();
+
+        clear_database(&client).await.unwrap();
+        let inserted = insert_person(&client).await;
+
+        let app = App::new().configure(app_config(pool));
+        let app = test::init_service(app).await;
+
+        let payload = format!(
+            r#"
+                {{
+                    "apelido": "{}",
+                    "nome": "Davi Feliciano",
+                    "nascimento": "1999-02-18"
+                }}
+            "#,
+            inserted.apelido
+        );
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+
+        let payload = r#"
+            {
+                "nome": "Davi Feliciano",
+                "nascimento": "1999-02-18"
+            }
+        "#
+        .to_string();
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let payload = r#"
+            {
+                "apelido": "johndoe",
+                "nome": "John Doe",
+                "nascimento": "1970-01-01"
+            }
+        "#
+        .to_string();
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::CREATED);
     }
 }

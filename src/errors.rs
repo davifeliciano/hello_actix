@@ -7,6 +7,7 @@ use tokio_postgres::error::Error as PostgresError;
 #[derive(Debug, derive_more::Display, derive_more::From)]
 pub enum AppError {
     NotFound,
+    Conflict,
     PostgresError(PostgresError),
     PoolError(PoolError),
     PostgresMapperError(PostgresMapperError),
@@ -18,6 +19,7 @@ impl ResponseError for AppError {
     fn status_code(&self) -> StatusCode {
         match self {
             AppError::NotFound => StatusCode::NOT_FOUND,
+            AppError::Conflict => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

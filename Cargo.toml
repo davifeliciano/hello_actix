@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4.4.0"
+chrono = "0.4.31"
 config = "0.13.3"
 deadpool-postgres = { version = "0.10.5", features = ["serde"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
+regex = "1.9.5"
 serde = { version = "1.0.188", features = ["derive"] }
 tokio-pg-mapper = "0.2.0"
 tokio-pg-mapper-derive = "0.2.0"

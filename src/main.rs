@@ -7,6 +7,7 @@ mod database;
 mod errors;
 mod handlers;
 mod models;
+mod utils;
 
 use crate::config::Config;
 use crate::handlers::{count_people, create_person, get_people, get_person};
