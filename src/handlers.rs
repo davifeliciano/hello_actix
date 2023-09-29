@@ -6,16 +6,17 @@ use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct PersonSearchTerm {
-    _t: Option<String>,
+    t: String,
 }
 
 #[get("")]
 pub async fn get_people(
-    _query_params: web::Query<PersonSearchTerm>,
+    query_params: web::Query<PersonSearchTerm>,
     pool: web::Data<Pool>,
 ) -> Result<HttpResponse, AppError> {
+    let search_term = query_params.into_inner();
     let client = pool.get().await.map_err(AppError::PoolError)?;
-    let people = database::get_people(&client).await?;
+    let people = database::get_people(&client, &search_term.t).await?;
 
     Ok(HttpResponse::Ok().json(people))
 }
@@ -170,7 +171,15 @@ mod tests {
         let app = test::init_service(app).await;
 
         let inserted = insert_person(&client).await;
-        let req = test::TestRequest::get().uri("/pessoas").to_request();
+
+        let res = test::TestRequest::get()
+            .uri("/pessoas")
+            .send_request(&app)
+            .await;
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let req = test::TestRequest::get().uri("/pessoas?t=rus").to_request();
         let result: Vec<Person> = test::call_and_read_body_json(&app, req).await;
 
         assert_eq!(vec![inserted], result);
