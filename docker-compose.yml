@@ -1,0 +1,40 @@
+version: "3.5"
+
+services:
+  app1: &app
+    build: .
+    environment: &appenv
+      PG__HOST: localhost
+      PG__USER: postgres
+      PG__PASSWORD: postgres
+      PG__DBNAME: hello_actix
+      PORT: 8080
+    depends_on:
+      - db
+    network_mode: "host"
+
+  app2:
+    <<: *app
+    environment:
+      <<: *appenv
+      PORT: 8081
+
+  nginx:
+    image: nginx:latest
+    depends_on:
+      - app1
+      - app2
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    network_mode: host
+
+  db:
+    image: postgres
+    hostname: database
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=hello_actix
+    volumes:
+      - ./dump.sql:/docker-entrypoint-initdb.d/hello_actix.sql
+    network_mode: host
