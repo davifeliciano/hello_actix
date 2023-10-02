@@ -41,6 +41,43 @@ pub async fn get_person(client: &Client, id: Uuid) -> Result<Person, AppError> {
     Ok(Person::from_row(row)?)
 }
 
+pub async fn create_person(client: &Client, person: Person) -> Result<Person, AppError> {
+    let row = client
+        .query_one(
+            r#"
+            INSERT INTO pessoas
+                (apelido, nome, nascimento, stack)
+            VALUES
+                ($1, $2, $3, $4)
+            RETURNING
+                id, apelido, nome, nascimento, stack;
+        "#,
+            &[
+                &person.apelido,
+                &person.nome,
+                &person.nascimento,
+                &person.stack,
+            ],
+        )
+        .await
+        .map_err(insert_error_mapper)?;
+
+    Ok(Person::from_row(row)?)
+}
+
+fn insert_error_mapper(err: tokio_postgres::Error) -> AppError {
+    match err.as_db_error().map(|err| err.constraint()) {
+        Some(Some(constraint)) => {
+            if constraint == "pessoas_apelido_key" {
+                AppError::Conflict
+            } else {
+                AppError::PostgresError(err)
+            }
+        }
+        _ => AppError::PostgresError(err),
+    }
+}
+
 pub async fn count_people(client: &Client) -> Result<i64, AppError> {
     let count: i64 = client
         .query_one("SELECT count(*) AS count FROM pessoas;", &[])

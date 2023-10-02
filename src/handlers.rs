@@ -56,39 +56,11 @@ pub async fn create_person(
     };
 
     let client = pool.get().await.map_err(AppError::PoolError)?;
+    let created = database::create_person(&client, person).await?;
 
-    client
-        .query(
-            r#"
-                INSERT INTO pessoas
-                    (apelido, nome, nascimento, stack)
-                VALUES
-                    ($1, $2, $3, $4);
-            "#,
-            &[
-                &person.apelido,
-                &person.nome,
-                &person.nascimento,
-                &person.stack,
-            ],
-        )
-        .await
-        .map_err(insert_error_mapper)?;
-
-    Ok(HttpResponse::Created().into())
-}
-
-fn insert_error_mapper(err: tokio_postgres::Error) -> AppError {
-    match err.as_db_error().map(|err| err.constraint()) {
-        Some(Some(constraint)) => {
-            if constraint == "pessoas_apelido_key" {
-                AppError::Conflict
-            } else {
-                AppError::PostgresError(err)
-            }
-        }
-        _ => AppError::PostgresError(err),
-    }
+    Ok(HttpResponse::Created()
+        .append_header(("Location", format!("/pessoas/{}", created.id.unwrap())))
+        .finish())
 }
 
 #[cfg(test)]
@@ -264,7 +236,7 @@ mod tests {
         let req = create_person_request_factory(payload).to_request();
         let res = test::call_service(&app, req).await;
 
-        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
         let payload = r#"
             {
@@ -292,5 +264,6 @@ mod tests {
         let res = test::call_service(&app, req).await;
 
         assert_eq!(res.status(), StatusCode::CREATED);
+        assert!(res.headers().get("Location").is_some())
     }
 }
