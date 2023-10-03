@@ -1,4 +1,4 @@
-use crate::{database, errors::AppError, models::Person, utils::validate_ymd_string};
+use crate::{database, errors::AppError, models::Person};
 use actix_web::{get, http::header::ContentType, post, web, HttpResponse};
 use deadpool_postgres::Pool;
 use serde::Deserialize;
@@ -50,10 +50,9 @@ pub async fn create_person(
 ) -> Result<HttpResponse, AppError> {
     let person = body.into_inner();
 
-    if !validate_ymd_string(&person.nascimento) {
-        return Ok(HttpResponse::UnprocessableEntity()
-            .body("Invalid date on field 'nascimento'. Expected format is YYYY-MM-DD."));
-    };
+    if let Some(msg) = person.get_error_message_if_not_valid() {
+        return Ok(HttpResponse::UnprocessableEntity().body(msg));
+    }
 
     let client = pool.get().await.map_err(AppError::PoolError)?;
     let created = database::create_person(&client, person).await?;
@@ -222,6 +221,7 @@ mod tests {
         let app = App::new().configure(app_config(pool));
         let app = test::init_service(app).await;
 
+        // Attempt with conflicting 'apelido'
         let payload = format!(
             r#"
                 {{
@@ -238,6 +238,7 @@ mod tests {
 
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
+        // Attempt with absent field
         let payload = r#"
             {
                 "nome": "Davi Feliciano",
@@ -251,6 +252,59 @@ mod tests {
 
         assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
+        // Attempt with 'apelido' bigger than allowed
+        let payload = format!(
+            r#"
+                {{
+                    "apelido": "{}",
+                    "nome": "Davi Feliciano",
+                    "nascimento": "1999-02-18"
+                }}
+            "#,
+            "x".repeat(Person::APELIDO_MAX_LEN + 1)
+        );
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Attempt with 'nome' bigger than allowed
+        let payload = format!(
+            r#"
+                {{
+                    "apelido": "feliciano",
+                    "nome": "{}",
+                    "nascimento": "1999-02-18"
+                }}
+            "#,
+            "x".repeat(Person::NOME_MAX_LEN + 1)
+        );
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Attempt apelido 'stack' word bigger than allowed
+        let payload = format!(
+            r#"
+                {{
+                    "apelido": "feliciano",
+                    "nome": "Davi Feliciano",
+                    "nascimento": "1999-02-18"
+                    "stack": ["{}"]
+                }}
+            "#,
+            "x".repeat(Person::STACK_WORD_MAX_LEN + 1)
+        );
+
+        let req = create_person_request_factory(payload).to_request();
+        let res = test::call_service(&app, req).await;
+
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Attempt with expected payload
         let payload = r#"
             {
                 "apelido": "johndoe",
